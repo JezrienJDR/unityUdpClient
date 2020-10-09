@@ -8,82 +8,111 @@ using System.Net;
 
 public class NetworkMan : MonoBehaviour
 {
+
+    [SerializeField]
+    public GameObject cube;
+
+    GameObject cube1;
+
     public UdpClient udp;
-    public GameObject playerGO;
 
-    public string myAddress;
-    public Dictionary<string,GameObject> currentPlayers;
-    public List<string> newPlayers, droppedPlayers;
-    public GameState lastestGameState;
-    public ListOfPlayers initialSetofPlayers;
-    
-    public MessageType latestMessage;
+    List<Player> playersInGame = new List<Player>();
 
+    bool populated = false;
+
+    public string clientID;
 
     // Start is called before the first frame update
     void Start()
     {
-        newPlayers = new List<string>();
-        droppedPlayers = new List<string>();
-        currentPlayers = new Dictionary<string, GameObject>();
-        initialSetofPlayers = new ListOfPlayers();
+
+        
 
         udp = new UdpClient();
-        udp.Connect("52.15.219.197",12345);
+        // 34.229.252.30
+        udp.Connect("54.91.131.245", 12345);
+
         Byte[] sendBytes = Encoding.ASCII.GetBytes("connect");
+      
         udp.Send(sendBytes, sendBytes.Length);
+
         udp.BeginReceive(new AsyncCallback(OnReceived), udp);
 
         InvokeRepeating("HeartBeat", 1, 1);
+
+        Byte[] sendBytes2 = Encoding.ASCII.GetBytes("spawn");
+        udp.Send(sendBytes2, sendBytes2.Length);
+
+        //cube1 = Instantiate(cube, new Vector3(0, 0, 0), new Quaternion(0, 0, 0, 0));
+
     }
 
     void OnDestroy(){
         udp.Dispose();
     }
 
+
+    public enum commands{
+        NEW_CLIENT,
+        UPDATE,
+        POPULATE,
+        CLIENTID,
+        DISCONNECT
+
+    };
+    
     [Serializable]
+    public class Message{
+        public commands cmd;
+    }
+    
+    public class idMessage
+    {
+        public string id;
+    }
+
+    [Serializable]
+    public class Player{
+        [Serializable]
         public struct receivedColor{
             public float R;
             public float G;
             public float B;
         }
-    [Serializable]
-    public class Player{
-        public string id;
-        public receivedColor color;        
-    }
 
-    [Serializable]
-    public class ListOfPlayers{
-        public Player[] players;
-
-        public ListOfPlayers(){
-            players = new Player[0];
+        [Serializable]
+        public struct receivedPosition
+        {
+            public float x;
+            public float y;
+            public float z;
         }
-    }
-    [Serializable]
-    public class ListOfDroppedPlayers{
-        public string[] droppedPlayers;
-    }
-    [Serializable]
-    public class GameState
-    {
-        public int pktID;
-        public Player[] players;
+
+        public string id;
+        public float xCoord;
+        public receivedColor color;
+        public receivedPosition position;
+        public GameObject gameCube = null;
+        public int spawned;
+
+        public int disconnected;
+
     }
 
     [Serializable]
-    public class MessageType{
-        public commands cmd;
+    public class NewPlayer{
+        
     }
-    public enum commands{
-        PLAYER_CONNECTED,
-        GAME_UPDATE,
-        PLAYER_DISCONNECTED,
-        CONNECTION_APPROVED,
-        LIST_OF_PLAYERS,
-    };
-    
+
+    [Serializable]
+    public class GameState{
+        public Player[] players;
+    }
+
+    public Message latestMessage;
+    public GameState latestGameState;
+    public idMessage idm;
+
     void OnReceived(IAsyncResult result){
         // this is what had been passed into BeginReceive as the second parameter:
         UdpClient socket = result.AsyncState as UdpClient;
@@ -96,42 +125,87 @@ public class NetworkMan : MonoBehaviour
         
         // do what you'd like with `message` here:
         string returnData = Encoding.ASCII.GetString(message);
-        // Debug.Log("Got this: " + returnData);
+        //Debug.Log("Got this: " + returnData);
         
-        latestMessage = JsonUtility.FromJson<MessageType>(returnData);
+
+        latestMessage = JsonUtility.FromJson<Message>(returnData);
         
-        Debug.Log(returnData);
+        
+      
+        //float R  = message["color"]["R"]
+        
         try{
             switch(latestMessage.cmd){
-                case commands.PLAYER_CONNECTED:
-                    ListOfPlayers latestPlayer = JsonUtility.FromJson<ListOfPlayers>(returnData);
-                    Debug.Log(returnData);
-                    foreach (Player player in latestPlayer.players){
-                        newPlayers.Add(player.id);
+                case commands.NEW_CLIENT:
+
+                    Player np = new Player();
+
+                    np = JsonUtility.FromJson<Player>(returnData);
+
+                    //playersInGame.Add(np);
+
+                    break;
+                case commands.UPDATE:
+                    latestGameState = JsonUtility.FromJson<GameState>(returnData);
+                    break;
+                case commands.POPULATE:
+                    if (populated == false)
+                    {
+                        Debug.Log("POPULATING");
+
+                        latestGameState = JsonUtility.FromJson<GameState>(returnData);
+
+                        foreach (Player p in latestGameState.players)
+                        {
+                            Player n = new Player();
+
+                            n.id = p.id;
+                            n.position = p.position;
+                            n.spawned = 0;
+                            n.color = p.color;
+
+                            
+                            
+                            //playersInGame.Add(n);
+
+                        }
+
+                        populated = true;
                     }
+
                     break;
-                case commands.GAME_UPDATE:
-                    lastestGameState = JsonUtility.FromJson<GameState>(returnData);
+                case commands.CLIENTID:
+                    Debug.Log("CLIENT ID ACQUIRED");
+
+                    idm = JsonUtility.FromJson<idMessage>(returnData);
+
+                    clientID = idm.id;
+
+                    Debug.Log(clientID);
+
+
                     break;
-                case commands.PLAYER_DISCONNECTED:
-                    ListOfDroppedPlayers latestDroppedPlayer = JsonUtility.FromJson<ListOfDroppedPlayers>(returnData);
-                    foreach (string player in latestDroppedPlayer.droppedPlayers){
-                        droppedPlayers.Add(player);
+                case commands.DISCONNECT:
+                    Debug.Log("Client disconnected");
+
+                    idm = JsonUtility.FromJson<idMessage>(returnData);
+
+                    foreach (Player p in playersInGame)
+                    {
+                        Debug.Log(p.id);
+                        Debug.Log(idm.id);
+
+                        if (p.id == idm.id)
+                        {
+                            Debug.Log("SETTING DISCONNECT");
+                            p.disconnected = 1;
+                            
+                        }
                     }
+
                     break;
-                case commands.CONNECTION_APPROVED:
-                    ListOfPlayers myPlayer = JsonUtility.FromJson<ListOfPlayers>(returnData);
-                    Debug.Log(returnData);
-                    foreach (Player player in myPlayer.players){
-                        newPlayers.Add(player.id);
-                        myAddress = player.id;
-                    }
-                    break;
-                case commands.LIST_OF_PLAYERS:
-                    initialSetofPlayers = JsonUtility.FromJson<ListOfPlayers>(returnData);
-                    break; 
                 default:
-                    Debug.Log("Error: " + returnData);
+                    Debug.Log("Error");
                     break;
             }
         }
@@ -143,57 +217,161 @@ public class NetworkMan : MonoBehaviour
         socket.BeginReceive(new AsyncCallback(OnReceived), socket);
     }
 
-    void SpawnPlayers(){
-        if (newPlayers.Count > 0){
-            foreach (string playerID in newPlayers){
-                currentPlayers.Add(playerID,Instantiate(playerGO, new Vector3(0,0,0),Quaternion.identity));
-                currentPlayers[playerID].name = playerID;
+    void SpawnPlayers()
+    {
+
+        foreach (Player g in playersInGame)
+        {
+            if(g.spawned == 0)
+            {
+                g.position.x = transform.position.x;
+                g.position.y = transform.position.y;
+                g.position.z = transform.position.z;
+
+                g.gameCube = Instantiate(cube, new Vector3(g.position.x, g.position.y, g.position.z), new Quaternion(0, 0, 0, 0));
+                //g.gameCube.GetComponent<CubeControls>().id = g.id;
+                g.spawned = 1;
             }
-            newPlayers.Clear();
         }
-        if (initialSetofPlayers.players.Length > 0){
-            Debug.Log(initialSetofPlayers);
-            foreach (Player player in initialSetofPlayers.players){
-                if (player.id == myAddress)
-                    continue;
-                currentPlayers.Add(player.id, Instantiate(playerGO, new Vector3(0,0,0), Quaternion.identity));
-                currentPlayers[player.id].GetComponent<Renderer>().material.color = new Color(player.color.R, player.color.G, player.color.B);
-                currentPlayers[player.id].name = player.id;
+
+
+
+    }
+
+    void UpdatePlayers()
+    {
+        
+
+        foreach (Player p in latestGameState.players)
+        {
+            bool inList = false;
+
+            foreach (Player g in playersInGame)
+            {
+                if (g.id == p.id)
+                {
+                    g.gameCube.GetComponent<Renderer>().material.SetColor("_Color", new Color(p.color.R, p.color.G, p.color.B));
+                    //g.gameCube.transform.position.Set(p.position.x + transform.position.x, p.position.y + transform.position.y, p.position.z + transform.position.z);
+                    //g.gameCube.transform.position.Set(p.position.x, p.position.y, p.position.z);
+
+                    if (g.id != clientID)
+                    {
+                        g.gameCube.transform.SetPositionAndRotation(new Vector3(p.position.x, p.position.y, p.position.z), new Quaternion(0, 0, 0, 0));
+                    }
+                    inList = true;
+                }
+                
             }
-            initialSetofPlayers.players = new Player[0];
+
+            if (inList == false)
+            {
+                Player n = new Player();
+
+                n.id = p.id;
+                n.position = p.position;
+                n.spawned = 0;
+                n.color = p.color;
+
+                playersInGame.Add(n);
+
+            }
+
+        }
+        
+        //cube1.GetComponent<Renderer>().material.SetColor("_Color", new Color(latestGameState.players[0].color.R, latestGameState.players[0].color.G, latestGameState.players[0].color.B));
+    }
+
+    void DestroyPlayers()
+    {
+        foreach (Player g in playersInGame)
+        {
+            if (g.disconnected == 1)
+            {
+                DestroyImmediate(g.gameCube);
+                playersInGame.Remove(g);
+            }
         }
     }
 
-    void UpdatePlayers(){
-        if (lastestGameState.players.Length >0){
-            foreach (NetworkMan.Player player in lastestGameState.players){
-                string playerID = player.id;
-                currentPlayers[player.id].GetComponent<Renderer>().material.color = new Color(player.color.R,player.color.G,player.color.B);
-            }
-            lastestGameState.players = new Player[0];
-        }
-    }
-
-    void DestroyPlayers(){
-        if (droppedPlayers.Count > 0){
-            foreach (string playerID in droppedPlayers){
-                Debug.Log(playerID);
-                Debug.Log(currentPlayers[playerID]);
-                Destroy(currentPlayers[playerID].gameObject);
-                currentPlayers.Remove(playerID);
-            }
-            droppedPlayers.Clear();
-        }
-    }
-    
-    void HeartBeat(){
+    void HeartBeat()
+    {
         Byte[] sendBytes = Encoding.ASCII.GetBytes("heartbeat");
         udp.Send(sendBytes, sendBytes.Length);
     }
 
-    void Update(){
+   [Serializable] 
+    public struct move
+    {
+        public string moveName;
+        public float x;
+        public float y;
+        public float z;
+    }
+
+
+    move left;
+    move right;
+
+    move newPos;
+
+    void MovementInput()
+    {
+        foreach (Player g in playersInGame)
+        {
+            if (g.id == clientID)
+            {
+                if (g.gameCube)
+                {
+                    Vector3 movementVector = new Vector3(0, 0, 0);
+
+                    if (Input.GetAxis("Horizontal") > 0)
+                    {
+                        movementVector.x = 0.1f;
+                        //Debug.Log("Moving RIGHT");
+                    }
+                    else if (Input.GetAxis("Horizontal") < 0)
+                    {
+                        movementVector.x = -0.1f;
+                        //Debug.Log("Moving LEFT");
+                    }
+
+                    if (Input.GetAxis("Vertical") > 0)
+                    {
+                        movementVector.y = 0.1f;
+                        //Debug.Log("Moving UP");
+                    }
+                    else if (Input.GetAxis("Vertical") < 0)
+                    {
+                        movementVector.y = -0.1f;
+                        //Debug.Log("Moving DOWN");
+                    }
+
+                    g.gameCube.transform.Translate(movementVector);
+
+                    newPos.x = g.gameCube.transform.position.x;
+                    newPos.y = g.gameCube.transform.position.y;
+                    newPos.z = g.gameCube.transform.position.z;
+                    newPos.moveName = "move";
+
+                    string _pos = JsonUtility.ToJson(newPos);
+                    Byte[] sendBytes = Encoding.ASCII.GetBytes(_pos);
+                    udp.Send(sendBytes, sendBytes.Length);
+
+                }
+            }
+
+        }
+    
+
+    }
+
+    void Update()
+    {
+        MovementInput();
         SpawnPlayers();
         UpdatePlayers();
         DestroyPlayers();
+
     }
+    
 }
